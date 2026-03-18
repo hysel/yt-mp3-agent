@@ -1,0 +1,7 @@
+# My favourite channels
+https://music.youtube.com/channel/UCi6FaPHy118w1H8L2NIgdMA
+https://music.youtube.com/channel/UCAE-8b0uh6UC25YWwpbyLVQ
+https://music.youtube.com/channel/UCXejACqxq25yqJfeKwnrNog
+https://music.youtube.com/channel/UCbLnYW1392zXAig-N0Vg2Mw
+
+# Commented lines and blank lines are ignored
