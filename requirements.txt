@@ -1,0 +1,5 @@
+yt-dlp[default]
+requests
+tqdm
+mutagen
+pillow

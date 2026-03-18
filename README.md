@@ -23,6 +23,14 @@ A Python command-line tool that downloads entire YouTube or YouTube Music channe
 
 ## Requirements
 
+**Install Python dependencies:**
+
+```bash
+pip install -r requirements.txt
+```
+
+Or manually:
+
 ```bash
 pip install -U "yt-dlp[default]" requests tqdm mutagen pillow
 ```
