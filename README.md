@@ -62,19 +62,19 @@ python youtube_mp3_agent.py --url-file channels.txt <destination> [options]
 
 ```bash
 # Download an entire channel
-python youtube_mp3_agent.py https://www.youtube.com/@mkbhd C:\Music
+python yt-mp3-agent.py https://www.youtube.com/@mkbhd C:\Music
 
 # YouTube Music channel
-python youtube_mp3_agent.py https://music.youtube.com/channel/UCxxxx C:\Music
+python yt-mp3-agent.py https://music.youtube.com/channel/UCxxxx C:\Music
 
 # 20 most recent videos, 320 kbps, 5 parallel threads
-python youtube_mp3_agent.py https://www.youtube.com/@lexfridman C:\Music -n 20 -q 320 -w 5
+python yt-mp3-agent.py https://www.youtube.com/@lexfridman C:\Music -n 20 -q 320 -w 5
 
 # Skip videos longer than 10 minutes
-python youtube_mp3_agent.py https://www.youtube.com/@mkbhd C:\Music --max-duration 10
+python yt-mp3-agent.py https://www.youtube.com/@mkbhd C:\Music --max-duration 10
 
 # Multiple channels from a file
-python youtube_mp3_agent.py --url-file channels.txt C:\Music
+python yt-mp3-agent.py --url-file channels.txt C:\Music
 ```
 
 **`channels.txt` format:**
