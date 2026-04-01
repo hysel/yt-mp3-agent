@@ -50,10 +50,10 @@ pip install -U "yt-dlp[default]" requests tqdm mutagen pillow
 
 ```bash
 # Single channel
-python youtube_mp3_agent.py <channel_url> <destination> [options]
+python yt-mp3-agent.py <channel_url> <destination> [options]
 
 # Multiple channels from a file
-python youtube_mp3_agent.py --url-file channels.txt <destination> [options]
+python yt-mp3-agent.py --url-file channels.txt <destination> [options]
 ```
 
 ---
