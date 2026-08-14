@@ -68,6 +68,9 @@ EXAMPLES
   # Multiple channels from a file
   python youtube_mp3_agent.py --url-file channels.txt C:/Music
 
+  # Multiple channels, auto-skip any file that already exists (no prompts)
+  python youtube_mp3_agent.py --url-file channels.txt C:/Music --skip-existing
+
   channels.txt format:
     # Lines starting with # are comments and are ignored
     https://www.youtube.com/@mkbhd
@@ -194,6 +197,7 @@ def channel_name_from_url(url: str) -> str:
       https://www.youtube.com/channel/UCxxxx       -> UCxxxx
       https://music.youtube.com/channel/UCxxxx     -> UCxxxx
       https://music.youtube.com/browse/MPADxxxx    -> MPADxxxx
+      https://www.youtube.com/playlist?list=PLxxxx -> PLxxxx
     """
     url = url.rstrip("/")
     for pattern in (
@@ -202,11 +206,33 @@ def channel_name_from_url(url: str) -> str:
         r"/channel/([^/?&]+)",
         r"/user/([^/?&]+)",
         r"/browse/([^/?&]+)",
+        r"[?&]list=([^&]+)",
     ):
         m = re.search(pattern, url)
         if m:
             return m.group(1)
     return url.split("/")[-1] or "channel"
+
+
+def normalize_playlist_url(url: str) -> str:
+    """
+    If a URL contains a 'list=' query param (e.g. a /watch?v=...&list=...
+    link copied from the "up next" sidebar or a queued video), rewrite it to
+    the canonical /playlist?list=... form. This forces yt-dlp to treat it
+    unambiguously as a full playlist rather than a single video, which is
+    what a bare /watch URL with a list param can otherwise resolve to.
+    Plain channel/video URLs without a list param are returned unchanged.
+    """
+    m = re.search(r"[?&]list=([^&]+)", url)
+    if not m:
+        return url
+    list_id = m.group(1)
+    # Don't touch actual "Mix"/auto-generated radio playlists (id starts
+    # with RD) — those are meant to follow a single seed video, not act as
+    # a fixed collection, so leave the original URL as-is for those.
+    if list_id.startswith("RD"):
+        return url
+    return f"https://www.youtube.com/playlist?list={list_id}"
 
 
 def sanitize_folder(name: str) -> str:
@@ -328,7 +354,7 @@ def clean_title(title: str) -> str:
 # Core runner
 # ---------------------------------------------------------------------------
 
-def run(channel_url: str, output_base: str, limit: int | None, quality: str, workers: int = 3, max_duration: int | None = None, meta: MetadataOptions | None = None):
+def run(channel_url: str, output_base: str, limit: int | None, quality: str, workers: int = 5, max_duration: int | None = None, meta: MetadataOptions | None = None, skip_existing: bool = False):
     check_dependencies()
     if meta is None:
         meta = MetadataOptions()
@@ -372,6 +398,15 @@ def run(channel_url: str, output_base: str, limit: int | None, quality: str, wor
         channel_url = resolved_url
         print(f"   ↳  Resolved to: {channel_url}")
 
+    # A /watch?v=...&list=... URL (e.g. copied while a video was playing as
+    # part of a queued playlist) can otherwise resolve to just that single
+    # video. Rewriting it to the canonical /playlist?list=... form forces
+    # yt-dlp to fetch the playlist's full entry list instead.
+    normalized_url = normalize_playlist_url(channel_url)
+    if normalized_url != channel_url:
+        print(f"   ↳  Playlist URL detected, using: {normalized_url}")
+        channel_url = normalized_url
+
     # --- Pre-fetch video list (flat, no download) ---
     print(f"\n🔍  Fetching video list from: {channel_url}")
     flat_opts = {
@@ -394,6 +429,7 @@ def run(channel_url: str, output_base: str, limit: int | None, quality: str, wor
         or info.get("uploader")
         or info.get("playlist_uploader")
         or (all_entries[0].get("channel") if all_entries else None)
+        or info.get("title")
         or channel_name_from_url(channel_url)
     )
     channel_name = sanitize_folder(channel_name)
@@ -433,7 +469,12 @@ def run(channel_url: str, output_base: str, limit: int | None, quality: str, wor
     # Map video_id -> True (overwrite) / False (skip)
     overwrite_decisions: dict[str, bool] = {}
 
-    if conflicts:
+    if conflicts and skip_existing:
+        for entry, _ in conflicts:
+            overwrite_decisions[entry.get("id", "")] = False
+        print(f"\n⏭   {len(conflicts)} file(s) already exist on disk — skipping (--skip-existing).\n")
+
+    elif conflicts:
         print(f"\n⚠️   {len(conflicts)} file(s) already exist on disk:")
         for entry, path in conflicts[:5]:
             print(f"     • {path.name}")
@@ -819,11 +860,12 @@ def main():
         ),
     )
     parser.add_argument(
-        "--workers", "-w", type=int, default=3, metavar="N",
+        "--workers", "-w", type=int, default=5, metavar="N",
         help=(
-            "Number of videos to download in parallel (default: 3).\n"
-            "Higher values are faster but use more bandwidth and CPU.\n"
-            "Recommended range: 2–6."
+            "Number of videos to download in parallel (default: 5).\n"
+            "Higher values are faster but use more bandwidth and CPU,\n"
+            "and increase the risk of YouTube rate-limiting/403 errors.\n"
+            "Recommended range: 3-8."
         ),
     )
     parser.add_argument(
@@ -834,14 +876,24 @@ def main():
         ),
     )
     parser.add_argument(
-        "--quality", "-q", default="192",
+        "--quality", "-q", default="320",
         choices=["128", "192", "256", "320"],
         help=(
-            "MP3 bitrate in kbps (default: 192).\n"
+            "MP3 bitrate in kbps (default: 320).\n"
             "  128  — small files, acceptable quality\n"
-            "  192  — good quality, recommended default\n"
+            "  192  — good quality\n"
             "  256  — high quality\n"
-            "  320  — maximum quality, largest files"
+            "  320  — maximum quality, largest files (recommended default)"
+        ),
+    )
+    parser.add_argument(
+        "--skip-existing", "-y", action="store_true", default=False,
+        help=(
+            "Automatically skip any file that already exists on disk,\n"
+            "with no interactive prompt. Already-downloaded videos tracked\n"
+            "in .archive.txt are always skipped regardless of this flag;\n"
+            "this only affects files present on disk but missing from the\n"
+            "archive (e.g. downloaded outside this tool)."
         ),
     )
     parser.add_argument(
@@ -949,7 +1001,7 @@ def main():
             print(f"\n{"=" * 60}")
             print(f"\U0001f4fa  Channel {i}/{len(urls)}: {url}")
             print(f"{"=" * 60}")
-        run(url, args.destination, args.limit, args.quality, args.workers, args.max_duration, meta)
+        run(url, args.destination, args.limit, args.quality, args.workers, args.max_duration, meta, args.skip_existing)
 
     if len(urls) > 1:
         print(f"\n\u2705  All {len(urls)} channels processed.")
