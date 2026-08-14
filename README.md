@@ -1,6 +1,6 @@
 # yt-mp3-agent
 
-A Python command-line tool that downloads entire YouTube or YouTube Music channels as MP3 files — with embedded album art, artist tags, parallel downloads, and smart duplicate skipping.
+A Python command-line tool that downloads entire YouTube or YouTube Music channels — or individual playlists — as MP3 files, with embedded album art, artist tags, parallel downloads, and smart duplicate skipping. Includes an optional PowerShell launcher that checks all dependencies before running.
 
 > 🤖 Built entirely through a conversation with [Claude.ai](https://claude.ai) by Anthropic — no code was written manually.
 
@@ -8,16 +8,19 @@ A Python command-line tool that downloads entire YouTube or YouTube Music channe
 
 ## Features
 
-- 🎵 Downloads full YouTube and YouTube Music channels as MP3
+- 🎵 Downloads full YouTube and YouTube Music channels, or any playlist, as MP3
 - 🖼️ Embeds video thumbnail as album art
 - 🏷️ Sets channel name as the artist ID3 tag
-- ⚡ Parallel multi-threaded downloads
+- ⚡ Parallel multi-threaded downloads (default: 5 concurrent)
 - ⏭️ Skips already-downloaded videos via an archive file
-- 🔁 Prompts to overwrite or skip files that already exist on disk
+- 🚦 `--skip-existing` flag to auto-skip on-disk conflicts with no prompts — ideal for unattended/scheduled runs
+- 🔁 Interactive overwrite/skip prompt when `--skip-existing` isn't used
 - ⏱️ Optional duration filter — skip videos longer than X minutes
-- 📋 Supports a text file with multiple channel URLs
+- 📋 Supports a text file with multiple channel or playlist URLs
+- 📼 Normalizes `/watch?v=...&list=...` links into full playlist downloads automatically
 - 📦 Auto-downloads `ffmpeg` on Windows if not installed
 - 📊 Progress bars per file and overall
+- 🪟 Optional PowerShell launcher (`Run-YtMp3Agent.ps1`) that verifies Python, pip packages, ffmpeg, and a JS runtime before running, and defaults to `channels.txt` + `--skip-existing` when run with no arguments
 
 ---
 
@@ -25,64 +28,110 @@ A Python command-line tool that downloads entire YouTube or YouTube Music channe
 
 **Install Python dependencies:**
 
-```bash
+```
 pip install -r requirements.txt
 ```
 
 Or manually:
 
-```bash
+```
 pip install -U "yt-dlp[default]" requests tqdm mutagen pillow
 ```
 
 **ffmpeg:**
+
 - Windows: auto-downloaded on first run
 - macOS: `brew install ffmpeg`
 - Ubuntu: `sudo apt install ffmpeg`
 
 **JavaScript runtime** (required by yt-dlp for YouTube):
+
 - Recommended: [Deno](https://deno.com) — enabled by default
 - Alternative: [Node.js 20+](https://nodejs.org)
+
+**PO Token provider (recommended):**
+
+YouTube increasingly requires a Proof-of-Origin token to authorize the actual media download, even when video info can still be fetched. If you see `HTTP Error 403: Forbidden` on specific videos, install a token provider:
+
+```
+pip install -U bgutil-ytdlp-pot-provider
+git clone --single-branch --branch 1.3.1 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git ~/bgutil-ytdlp-pot-provider
+cd ~/bgutil-ytdlp-pot-provider/server
+npm install
+npx tsc
+```
+
+yt-dlp auto-detects the provider once it's in this location — no extra flags needed. Verify it's active with:
+
+```
+yt-dlp -v "https://www.youtube.com/watch?v=dQw4w9WgXcQ" 2>&1 | grep pot
+```
 
 ---
 
 ## Usage
 
-```bash
-# Single channel
-python yt-mp3-agent.py <channel_url> <destination> [options]
+```
+# Single channel or playlist
+python yt-mp3-agent.py <url> <destination> [options]
 
-# Multiple channels from a file
+# Multiple channels/playlists from a file
 python yt-mp3-agent.py --url-file channels.txt <destination> [options]
+```
+
+### Windows: `Run-YtMp3Agent.ps1`
+
+A PowerShell wrapper is included that checks Python, required pip packages, ffmpeg, and a JS runtime before running, and offers to install anything missing.
+
+```powershell
+# Run with your own arguments (forwarded as-is to the Python script)
+.\Run-YtMp3Agent.ps1 <url> <destination> [options]
+
+# Run with no arguments: uses channels.txt + --skip-existing automatically
+.\Run-YtMp3Agent.ps1
+```
+
+The no-argument default reads `channels.txt` from the script's own folder and downloads into that same folder, skipping anything already downloaded with no prompts — useful for re-running periodically to pick up new uploads.
+
+First-time setup on Windows may require:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+Unblock-File .\Run-YtMp3Agent.ps1
 ```
 
 ---
 
 ## Examples
 
-```bash
+```
 # Download an entire channel
 python yt-mp3-agent.py https://www.youtube.com/@mkbhd C:\Music
 
 # YouTube Music channel
 python yt-mp3-agent.py https://music.youtube.com/channel/UCxxxx C:\Music
 
-# 20 most recent videos, 320 kbps, 5 parallel threads
-python yt-mp3-agent.py https://www.youtube.com/@lexfridman C:\Music -n 20 -q 320 -w 5
+# A specific playlist (watch?v=...&list=... links work too)
+python yt-mp3-agent.py "https://www.youtube.com/playlist?list=PLxxxxxxxx" C:\Music
+
+# 20 most recent videos, 320 kbps, 8 parallel threads
+python yt-mp3-agent.py https://www.youtube.com/@lexfridman C:\Music -n 20 -q 320 -w 8
 
 # Skip videos longer than 10 minutes
 python yt-mp3-agent.py https://www.youtube.com/@mkbhd C:\Music --max-duration 10
 
-# Multiple channels from a file
-python yt-mp3-agent.py --url-file channels.txt C:\Music
+# Multiple channels from a file, auto-skip existing files (no prompts)
+python yt-mp3-agent.py --url-file channels.txt C:\Music --skip-existing
 ```
 
 **`channels.txt` format:**
+
 ```
 # Lines starting with # are ignored
 https://www.youtube.com/@mkbhd
 https://www.youtube.com/@lexfridman
 https://music.youtube.com/channel/UCxxxx
+https://www.youtube.com/playlist?list=PLxxxxxxxx
 ```
 
 ---
@@ -91,39 +140,46 @@ https://music.youtube.com/channel/UCxxxx
 
 ```
 <destination>/
-└── <Channel Name>/
+└── <Channel or Playlist Name>/
     ├── Video Title.mp3
     ├── Another Video.mp3
-    └── .archive.txt        ← tracks downloaded IDs, hidden file
+    └── .archive.txt          (hidden — tracks downloaded video IDs)
 ```
+
+For playlists without a single clear uploader (e.g. curated/multi-artist playlists), the folder is named after the playlist title instead of a channel name.
 
 ---
 
 ## Options
 
-| Flag | Short | Description | Default |
-|---|---|---|---|
-| `--url-file FILE` | `-f` | Text file with one channel URL per line | — |
-| `--workers N` | `-w` | Parallel download threads | `3` |
-| `--limit N` | `-n` | Max videos to download | all |
-| `--quality KBPS` | `-q` | MP3 bitrate: 128 / 192 / 256 / 320 | `192` |
-| `--max-duration MIN` | `-d` | Skip videos longer than N minutes | — |
+| Flag                 | Short | Description                                        | Default |
+| -------------------- | ----- | --------------------------------------------------- | ------- |
+| `--url-file FILE`    | `-f`  | Text file with one channel/playlist URL per line     | —       |
+| `--workers N`        | `-w`  | Parallel download threads                            | `5`     |
+| `--limit N`          | `-n`  | Max videos to download                               | all     |
+| `--quality KBPS`     | `-q`  | MP3 bitrate: 128 / 192 / 256 / 320                    | `320`   |
+| `--max-duration MIN` | `-d`  | Skip videos longer than N minutes                     | —       |
+| `--skip-existing`    | `-y`  | Auto-skip files already on disk, no interactive prompt| off     |
+
+Already-downloaded videos tracked in `.archive.txt` are always skipped regardless of `--skip-existing` — that flag only affects files present on disk but missing from the archive (e.g. downloaded outside this tool).
+
+Workers above ~8–10 increase the risk of YouTube rate-limiting (`403` errors). If you hit 403s, lower `--workers` before troubleshooting further.
 
 ### Metadata Options
 
 All metadata flags are optional and additive. The only automatic tags are **artist** (channel name) and **cover art** (thumbnail).
 
-| Flag | Description | Default |
-|---|---|---|
-| `--genre GENRE` | Set the genre ID3 tag | not set |
-| `--album ALBUM` | Set the album ID3 tag | not set |
-| `--year` | Embed the upload year as the year tag | off |
-| `--comment-url` | Embed the YouTube video URL as the comment tag | off |
-| `--track-numbers` | Number tracks by position in the download queue | off |
-| `--strip-title` | Clean YouTube noise from title tags: `(Official Video)`, `[HD]`, etc. | off |
-| `--no-art` | Skip thumbnail embedding | off |
-| `--no-artist` | Don't override the artist tag with the channel name | off |
-| `--description-as-comment` | Embed the video description as the comment tag (one extra API call per video) | off |
+| Flag                       | Description                                                                   | Default |
+| -------------------------- | ------------------------------------------------------------------------------ | ------- |
+| `--genre GENRE`            | Set the genre ID3 tag                                                          | not set |
+| `--album ALBUM`            | Set the album ID3 tag                                                          | not set |
+| `--year`                   | Embed the upload year as the year tag                                          | off     |
+| `--comment-url`            | Embed the YouTube video URL as the comment tag                                 | off     |
+| `--track-numbers`          | Number tracks by position in the download queue                               | off     |
+| `--strip-title`            | Clean YouTube noise from title tags: `(Official Video)`, `[HD]`, etc.         | off     |
+| `--no-art`                 | Skip thumbnail embedding                                                       | off     |
+| `--no-artist`              | Don't override the artist tag with the channel name                            | off     |
+| `--description-as-comment` | Embed the video description as the comment tag (one extra API call per video)  | off     |
 
 ---
 
@@ -132,58 +188,34 @@ All metadata flags are optional and additive. The only automatic tags are **arti
 `.archive.txt` records the YouTube video ID of every completed download. On the next run, any ID already in this file is skipped automatically — even if you've renamed or moved the MP3.
 
 - Delete a line → re-download that video next run
-- Delete the file → treat everything as new (overwrite prompt will catch existing files on disk)
+- Delete the file → treat everything as new (existing files on disk are then handled per `--skip-existing` / the interactive prompt)
+
+---
+
+## Playlist URLs
+
+Any URL containing a `list=` parameter — including `/watch?v=...&list=...` links copied while a video is playing as part of a queue — is automatically normalized to the canonical `/playlist?list=...` form, so the full playlist downloads rather than just the single video. YouTube auto-generated "Mix"/radio playlists (IDs starting with `RD`) are left as single-video URLs, since those aren't fixed collections.
+
+---
+
+## Troubleshooting
+
+**`HTTP Error 403: Forbidden`**
+Usually a missing PO Token provider (see Requirements above) or too many concurrent workers. Try lowering `--workers` to 3–5, and confirm yt-dlp is up to date (`pip install -U "yt-dlp[default]"`).
+
+**`This playlist type is unviewable`**
+Common with YouTube Music channel URLs; the script auto-resolves these to their canonical `youtube.com` channel URL internally.
+
+**PowerShell: "running scripts is disabled"**
+Run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once, then retry.
 
 ---
 
 ## How It Was Built
 
-This script was built entirely through a conversation with **[Claude.ai](https://claude.ai)** by [Anthropic](https://www.anthropic.com) — no code was written by hand. The full feature set was developed iteratively by describing requirements, reporting errors, and requesting improvements in plain language.
+This script was built entirely through a conversation with **[Claude.ai](https://claude.ai)** by [Anthropic](https://www.anthropic.com) — no code was written by hand. The full feature set, including bug fixes and troubleshooting, was developed iteratively by describing requirements, reporting errors, and requesting improvements in plain language.
 
-It's a practical example of using an AI assistant to build a real, production-ready command-line tool from scratch.
-
----
-
-## Regenerating This Script with Claude
-
-You can recreate this script from scratch by pasting the following prompt into [Claude.ai](https://claude.ai):
-
----
-
-> Create a Python command-line script that downloads an entire YouTube or YouTube Music channel as MP3 files using yt-dlp.
->
-> Requirements:
-> - Accept a channel URL and a destination folder as positional arguments
-> - Support a `--url-file` flag to pass a text file with multiple channel URLs (one per line, `#` lines ignored)
-> - Skip already-downloaded videos using yt-dlp's built-in download archive file (`.archive.txt`)
-> - Before downloading, detect MP3 files that already exist on disk and prompt the user to overwrite or skip — with options to apply the choice to all remaining conflicts
-> - Download audio only (no video), convert to MP3 using ffmpeg, and embed the video thumbnail as album art
-> - Set the channel name as the artist ID3 tag
-> - Support parallel downloads via a `--workers` flag (default: 3)
-> - Show a tqdm progress bar per file (bytes + speed) and an overall progress bar (videos completed)
-> - Pre-fetch the video list before downloading so the total count, already-downloaded count, and to-download count are printed upfront
-> - Print the video title when each download starts and when it completes
-> - Support `--limit N` to download only the N most recent videos
-> - Support `--quality` with choices 128 / 192 / 256 / 320 kbps (default: 192)
-> - Support `--max-duration MINUTES` to skip videos longer than a given duration
-> - Support YouTube Music URLs (music.youtube.com) by resolving them to their canonical youtube.com channel URL before processing
-> - On Windows, auto-download a static ffmpeg build if ffmpeg is not found on PATH
-> - Auto-detect Node.js and inject it into PATH so yt-dlp can use it as a JS runtime
-> - Save MP3s to `<destination>/<channel name>/` using the real channel display name (not the URL handle)
-> - File names should be the video title only, with no video ID suffix
-> - Optional metadata flags (all off by default):
->   - `--genre` — set the genre ID3 tag
->   - `--album` — set the album ID3 tag
->   - `--year` — embed the video upload year as the year tag
->   - `--comment-url` — embed the YouTube video URL as the comment tag
->   - `--track-numbers` — number tracks by position in the download queue
->   - `--strip-title` — clean common YouTube noise from title tags (e.g. "(Official Video)", "[HD]")
->   - `--no-art` — skip thumbnail embedding
->   - `--no-artist` — don't override the artist tag
->   - `--description-as-comment` — fetch and embed the video description as the comment tag
-> - Include a detailed `-h` / `--help` output with descriptions for every argument
-> - Windows-compatible: sanitize folder and file names, use `windowsfilenames: True` in yt-dlp
-> - Dependencies: `yt-dlp[default]`, `requests`, `tqdm`, `mutagen`, `pillow`
+It's a practical example of using an AI assistant to build and maintain a real, production-ready command-line tool from scratch.
 
 ---
 
